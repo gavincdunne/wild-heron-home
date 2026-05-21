@@ -1,0 +1,182 @@
+# =============================================================================
+# WildHeronHome — docker-compose.yml
+#
+# This file defines the entire home infrastructure stack as Docker containers.
+#
+# WHAT IS DOCKER COMPOSE?
+#   Docker Compose is a tool for defining and running multiple containers at
+#   once. Instead of starting each service manually with long `docker run`
+#   commands, you describe all your services here in one file and start
+#   everything with a single command: `docker compose up -d`
+#
+# HOW TO USE THIS FILE:
+#   1. Copy .env.example to .env and fill in your real values
+#   2. Run: docker compose up -d
+#   3. Stop everything: docker compose down
+#   4. View logs for one service: docker compose logs -f jellyfin
+#
+# KEY CONCEPTS IN THIS FILE:
+#   - image:    The pre-built Docker image to use (pulled from Docker Hub or GHCR)
+#   - ports:    Maps host:container port (e.g. "8096:8096" means reach Jellyfin
+#               at http://localhost:8096)
+#   - volumes:  Mounts host directories into the container so data persists
+#               even when the container is stopped or recreated
+#   - env_file: Loads environment variables (passwords, paths) from .env
+#   - restart:  "unless-stopped" means the container auto-starts on boot and
+#               restarts after crashes — but stays stopped if you stop it manually
+# =============================================================================
+
+version: "3.9"
+
+# Each service is its own isolated microservice — independently restartable,
+# independently upgradeable, independently debuggable.
+services:
+
+  # ---------------------------------------------------------------------------
+  # JELLYFIN — Media Server
+  # ---------------------------------------------------------------------------
+  # Jellyfin lets you stream your local movie and TV collection to any device
+  # on your network (or remotely via Tailscale). Think of it as your own
+  # personal Netflix, served from your own hard drive.
+  #
+  # Accessed at: http://localhost:8096 (or whatever JELLYFIN_PORT is set to in .env)
+  #
+  # Key volumes:
+  #   /config — Jellyfin's settings, metadata, and database. Keep this safe.
+  #   /media  — Your actual movie/TV files. Mounted read-only (:ro) so Jellyfin
+  #             can read but never accidentally delete your files.
+  # ---------------------------------------------------------------------------
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    ports:
+      - "${JELLYFIN_PORT:-8096}:8096"         # ${VAR:-default} uses .env value or falls back to 8096
+    volumes:
+      - ./stacks/jellyfin/config:/config      # Jellyfin settings and database
+      - ${MEDIA_PATH:-/mnt/media}:/media:ro   # Your media files — read-only for safety
+    env_file: .env
+
+  # ---------------------------------------------------------------------------
+  # PI-HOLE — Network-Wide Ad Blocking + DNS
+  # ---------------------------------------------------------------------------
+  # Pi-hole acts as a DNS server for your entire home network. When any device
+  # (phone, TV, laptop) makes a DNS request (e.g. "where is google.com?"),
+  # it goes through Pi-hole first. Pi-hole blocks known ad/tracking domains
+  # before the request ever leaves your house.
+  #
+  # Setup required after launch: Point your router's DNS to this machine's IP.
+  #
+  # Ports:
+  #   53/tcp + 53/udp — DNS (the standard DNS port — must be 53, cannot change)
+  #   8080            — Pi-hole web admin UI
+  # ---------------------------------------------------------------------------
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    restart: unless-stopped
+    ports:
+      - "53:53/tcp"                       # DNS over TCP (used for large responses)
+      - "53:53/udp"                       # DNS over UDP (standard DNS queries)
+      - "${PIHOLE_PORT:-8080}:80"         # Web admin dashboard
+    volumes:
+      - ./stacks/pihole/config:/etc/pihole   # Pi-hole settings and blocklists
+    env_file: .env
+
+  # ---------------------------------------------------------------------------
+  # PORTAINER — Docker Container Management UI
+  # ---------------------------------------------------------------------------
+  # Portainer gives you a web-based dashboard to manage all your Docker
+  # containers, images, volumes, and networks. Instead of memorizing docker CLI
+  # commands, you can start/stop/restart containers through a browser.
+  # Great for learning what's running and debugging issues visually.
+  #
+  # Accessed at: https://localhost:9443 (HTTPS — Portainer uses its own cert)
+  #
+  # The docker.sock volume gives Portainer the ability to control Docker itself.
+  # It's a Unix socket that the Docker daemon exposes for management access.
+  # ---------------------------------------------------------------------------
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - "${PORTAINER_PORT:-9443}:9443"         # HTTPS web UI
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # Grants Portainer control over Docker
+      - ./stacks/portainer/data:/data               # Portainer's own settings and users
+
+  # ---------------------------------------------------------------------------
+  # HOME ASSISTANT — Smart Home Hub
+  # ---------------------------------------------------------------------------
+  # Home Assistant is the brain of the smart home. It connects to all your
+  # smart devices (lights, locks, cameras, sensors) and lets you automate them,
+  # build dashboards, and control everything from one place.
+  #
+  # network_mode: host — HA needs direct access to your local network (not
+  # behind Docker's internal NAT) so it can discover devices via mDNS/Zeroconf
+  # and communicate with Zigbee/Z-Wave USB adapters. This is the HA-recommended
+  # setup and means the port mapping below is informational only (not enforced).
+  #
+  # Accessed at: http://localhost:8123
+  # ---------------------------------------------------------------------------
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    network_mode: host    # Host networking required for mDNS device discovery and USB adapters
+    ports:
+      - "${HA_PORT:-8123}:8123"
+    volumes:
+      - ./stacks/home-assistant/config:/config   # All automations, integrations, and dashboards
+    env_file: .env
+
+  # ---------------------------------------------------------------------------
+  # IMMICH — Self-Hosted Photo and Video Backup
+  # ---------------------------------------------------------------------------
+  # Immich is an open-source replacement for Google Photos. Your phone backs up
+  # photos automatically, and you get a full web + mobile UI for browsing,
+  # searching (including AI face/object recognition), and sharing albums.
+  #
+  # Immich requires three services running together:
+  #   immich-server   — The main web application and API
+  #   immich-redis    — Cache and job queue (makes background tasks fast)
+  #   immich-postgres — Database storing all photo metadata, albums, and users
+  #
+  # depends_on ensures Redis and Postgres start before the server does,
+  # preventing connection errors on first boot.
+  # ---------------------------------------------------------------------------
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:release
+    container_name: immich_server
+    restart: unless-stopped
+    ports:
+      - "${IMMICH_PORT:-2283}:3001"
+    volumes:
+      - ${PHOTOS_PATH:-/mnt/photos}:/usr/src/app/upload   # Where uploaded photos are stored on disk
+      - ./stacks/immich/config:/config
+    env_file: .env
+    depends_on:
+      - immich-redis
+      - immich-postgres
+
+  # Redis: In-memory cache and job queue used by Immich for background
+  # processing (thumbnail generation, ML tasks). You don't interact with
+  # this directly — it just makes Immich faster and more reliable.
+  immich-redis:
+    image: redis:7-alpine    # Alpine = minimal Linux base image (~5MB vs ~100MB full)
+    container_name: immich_redis
+    restart: unless-stopped
+
+  # Postgres: The relational database storing all Immich metadata —
+  # photo records, user accounts, albums, tags, and face recognition data.
+  # pgvecto-rs is Postgres extended with vector search so Immich can run
+  # AI-powered "find similar photos" and semantic search features.
+  # IMPORTANT: Back up the pgdata volume — losing it means losing all metadata.
+  immich-postgres:
+    image: tensorchord/pgvecto-rs:pg14-v0.2.0
+    container_name: immich_postgres
+    restart: unless-stopped
+    volumes:
+      - ./stacks/immich/pgdata:/var/lib/postgresql/data   # Database files — back this up!
+    env_file: .env

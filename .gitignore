@@ -1,0 +1,59 @@
+# =============================================================================
+# WildHeronHome — .gitignore
+#
+# This file tells git which files to NEVER track. Critical for two reasons:
+#   1. Security — .env files contain passwords, API keys, and tokens. If these
+#      get pushed to a public repo, they are exposed to the entire internet.
+#   2. Cleanliness — generated data (DB files, logs, Docker volumes) is large,
+#      machine-specific, and has no place in version control.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Secrets and environment config
+# -----------------------------------------------------------------------------
+# .env holds all your real credentials (passwords, API keys, paths).
+# .env.example is the SAFE version — it's committed and shows the shape of the
+# config without any real values. See .env.example for what goes in .env.
+.env
+*.secret
+secrets/
+
+
+# -----------------------------------------------------------------------------
+# Docker volume data
+# -----------------------------------------------------------------------------
+# Container data directories (databases, app state) are generated at runtime.
+# They belong on the host machine, not in git.
+config/
+data/
+stacks/*/data/
+stacks/*/pgdata/
+stacks/*/db/
+
+
+# -----------------------------------------------------------------------------
+# Logs
+# -----------------------------------------------------------------------------
+*.log
+logs/
+
+
+# -----------------------------------------------------------------------------
+# OS-generated junk
+# -----------------------------------------------------------------------------
+# Windows
+Thumbs.db
+Desktop.ini
+
+# macOS (Whit's MacBook Air may touch this repo)
+.DS_Store
+.AppleDouble
+
+# -----------------------------------------------------------------------------
+# Editor and IDE files
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
