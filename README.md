@@ -1,4 +1,5 @@
 # Wild Heron Home
+*Built by WeekendWare*
 
 > A self-hosted home built on open source. Media, smart home, automation, and whatever else sounds fun.
 
